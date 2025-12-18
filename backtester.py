@@ -44,15 +44,15 @@ class SilentBacktester:
         # 2. Strategy Classification
         df['Setup'] = 'None'
         
-        # Setup A: Oversold Bounce (Panic)
-        df.loc[df['RSI'] < 30, 'Setup'] = 'OVERSOLD_DIP'
+        # Setup A: Oversold Bounce (UPDATED: RSI < 35)
+        # This catches "early" dips in strong stocks like NVDA
+        df.loc[df['RSI'] < 35, 'Setup'] = 'OVERSOLD_DIP'
         
         # Setup B: Momentum Breakout (Volume Rush)
         # High Volume + Price Up + Price above MA20
         df.loc[(df['RVOL'] > 1.5) & (df['Close'] > df['Open']) & (df['Close'] > df['MA20']), 'Setup'] = 'MOMENTUM_BREAK'
         
-        # Setup C: Trend Reclaim (Crossing the line)
-        # Yesterday was below MA20, Today is above MA20
+        # Setup C: Trend Reclaim
         df.loc[(df['Close'] > df['MA20']) & (df['Close'].shift(1) < df['MA20'].shift(1)), 'Setup'] = 'TREND_RECLAIM'
 
         self.data = df.loc[self.start_date:]

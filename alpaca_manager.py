@@ -12,7 +12,7 @@ from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockLatestTradeRequest
 
 # --- CONFIGURATION ---
-load_dotenv()  # <--- LOADS KEYS FROM .env FILE
+load_dotenv()
 
 API_KEY = os.getenv("ALPACA_KEY")
 SECRET_KEY = os.getenv("ALPACA_SECRET")
@@ -26,22 +26,14 @@ engine = sqlalchemy.create_engine('sqlite:///silent_swing.db')
 
 class AlpacaExecutor:
     def __init__(self):
-        # 1. Trading Client (Executes Orders)
         self.trading_client = TradingClient(API_KEY, SECRET_KEY, paper=PAPER)
-        
-        # 2. Data Client (Fetches Live Prices FAST)
         self.data_client = StockHistoricalDataClient(API_KEY, SECRET_KEY)
         
-        # 3. Cache Account Info
-        self.account = self.trading_client.get_account()
-        
     def get_buying_power(self):
-        # Refresh account data to get accurate BP
-        self.account = self.trading_client.get_account()
-        return float(self.account.buying_power)
+        account = self.trading_client.get_account()
+        return float(account.buying_power)
 
     def get_current_positions(self):
-        """Returns a list of symbols we currently own."""
         try:
             positions = self.trading_client.get_all_positions()
             return [p.symbol for p in positions]
@@ -50,9 +42,6 @@ class AlpacaExecutor:
             return []
 
     def get_pending_buy_symbols(self):
-        """
-        Returns a list of tickers that have active BUY orders waiting to fill.
-        """
         try:
             req = GetOrdersRequest(status=QueryOrderStatus.OPEN, side=OrderSide.BUY)
             orders = self.trading_client.get_orders(filter=req)
@@ -62,16 +51,12 @@ class AlpacaExecutor:
             return []
 
     def get_latest_price(self, ticker):
-        """
-        Fetches the latest trade price directly from Alpaca (Much faster than YFinance).
-        """
         try:
             req = StockLatestTradeRequest(symbol_or_symbols=ticker)
             trade = self.data_client.get_stock_latest_trade(req)
             return float(trade[ticker].price)
         except Exception as e:
-            print(f"⚠️ Alpaca Data Failed for {ticker}: {e}. Falling back to estimate.")
-            # Fallback is dangerous, better to skip or return None, but keeping 100 for safety logic
+            print(f"⚠️ Alpaca Data Failed for {ticker}: {e}")
             return 0.0
 
     def execute_buy(self, ticker, stop_price, allocation_pct=0.10):
@@ -83,30 +68,28 @@ class AlpacaExecutor:
                 return
 
             # 2. Calculate Quantity
-            # Note: Using 'cash' is safer than buying_power for beginners
             account_cash = float(self.trading_client.get_account().cash)
             spend_amount = account_cash * allocation_pct
-            
             qty = int(spend_amount // latest_price)
             
             if qty < 1:
-                print(f"⚠️ Insufficient funds to buy {ticker} (Cash: ${account_cash:.2f})")
+                print(f"⚠️ Insufficient funds to buy {ticker}")
                 return
 
-            # 3. Define The Bracket
-            # Take Profit: +15%
-            take_profit_price = round(latest_price * 1.15, 2)
-            # Stop Loss: Passed from Scanner
+            # 3. Define The Bracket (UPDATED SETTINGS)
+            # Take Profit: Lowered to +10% (Easier to hit in swing trades)
+            take_profit_price = round(latest_price * 1.10, 2)
             stop_loss_price = round(stop_price, 2)
 
             print(f"🔒 Setting Bracket for {ticker}: Entry ~${latest_price} | Stop ${stop_loss_price} | Target ${take_profit_price}")
 
-            # 4. Construct Order
+            # 4. Construct Order (UPDATED: GTC)
             order_data = MarketOrderRequest(
                 symbol=ticker,
                 qty=qty,
                 side=OrderSide.BUY,
-                time_in_force=TimeInForce.DAY,
+                # CRITICAL FIX: GTC ensures stop loss survives overnight
+                time_in_force=TimeInForce.GTC, 
                 take_profit=TakeProfitRequest(limit_price=take_profit_price),
                 stop_loss=StopLossRequest(stop_price=stop_loss_price)
             )
